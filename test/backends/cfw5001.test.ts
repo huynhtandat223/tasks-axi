@@ -77,9 +77,19 @@ async function eventsOf(taskId: string): Promise<Row[]> {
 const bodyOf = (event: Row) => JSON.parse(String(event.body));
 
 const dirs: string[] = [];
-afterAll(() => {
+const probeStores: Cfw5001Store[] = [];
+afterAll(async () => {
+  // Probe rows cannot be deleted: leave each with `section: null` (dependents go first).
+  for (const store of probeStores) {
+    for (let pass = 0; pass < 5; pass++) {
+      const { items } = await store.list({});
+      if (items.length === 0) break;
+      for (const task of items)
+        await store.remove(task.id).catch(() => undefined);
+    }
+  }
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
-});
+}, 120000);
 
 function probe(
   options: { api?: ApiTransport; offline?: SqliteTransport } = {},
@@ -102,6 +112,8 @@ function probe(
     now: () => "2026-10-31",
     ...options,
   });
+  if (live)
+    probeStores.push(new Cfw5001Store({ path: `${path}.cleanup`, cfw }));
   const id = (x: string) => `pt-${RUN}-${n}-${x}`;
   return { home, dir, path, cfw, store, id };
 }
@@ -146,23 +158,32 @@ describe("renderRows", () => {
 });
 
 describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
-  it("pages past 100 rows when reading the main home", async () => {
-    const count = (
-      await api(
-        `fm_task?$top=0&$count=true&${q("backlogHome eq 'main' and section ne null")}`,
-      )
-    ).json["@odata.count"];
-    expect(count).toBeGreaterThan(100);
-    const store = new Cfw5001Store({
-      path: join(tmpdir(), `cfw5001-main-${RUN}.md`),
-      cfw: {
-        home: "main",
+  it("pages through every row of a home", async () => {
+    const pages: string[] = [];
+    const counting: typeof fetch = (input, init) => {
+      if (String(input).includes("/api/fm_task?")) pages.push(String(input));
+      return fetch(input, init);
+    };
+    const p = probe();
+    for (const x of ["a", "b", "c"])
+      await p.store.create({ id: p.id(x), title: `probe ${x}` });
+    const paged = new Cfw5001Store({
+      path: `${p.path}.paged`,
+      cfw: p.cfw,
+      api: new ApiTransport({
         baseUrl: BASE,
         tokenFile: TOKEN_FILE,
         auth: "bearer",
-      },
+        fetch: counting,
+        pageSize: 2,
+      }),
     });
-    expect((await store.list({})).total).toBe(count);
+    expect((await paged.list({})).items.map((t) => t.id)).toEqual([
+      p.id("a"),
+      p.id("b"),
+      p.id("c"),
+    ]);
+    expect(pages).toHaveLength(2);
   });
 
   it("writes one event and one PATCH per changed task and reads every field back", async () => {

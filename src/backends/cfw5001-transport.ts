@@ -146,6 +146,8 @@ export interface ApiOptions {
   auth: "bearer" | "cookie";
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** Rows per list request; the host caps `$top` at 100. */
+  pageSize?: number;
 }
 
 /** The writer's token rule: a regular file the user owns, no group or other bits. */
@@ -260,14 +262,15 @@ export class ApiTransport implements Transport {
 
   private async listAll(table: string, filter: string, orderby: string) {
     const out: Row[] = [];
-    for (let skip = 0; ; skip += 100) {
-      const q = `$top=100&$skip=${skip}&$orderby=${encodeURIComponent(orderby)}&$filter=${encodeURIComponent(filter)}`;
+    const size = this.options.pageSize ?? 100;
+    for (let skip = 0; ; skip += size) {
+      const q = `$top=${size}&$skip=${skip}&$orderby=${encodeURIComponent(orderby)}&$filter=${encodeURIComponent(filter)}`;
       const page = (this.ok(
         await this.http("GET", `/api/${table}?${q}`),
         `list ${table}`,
       )?.value ?? []) as Row[];
       out.push(...page);
-      if (page.length < 100) return out;
+      if (page.length < size) return out;
     }
   }
 

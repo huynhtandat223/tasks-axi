@@ -61,9 +61,9 @@ describe("parseConfigToml", () => {
   });
 
   it("rejects a non-numeric done_keep value", () => {
-    expect(() =>
-      parseConfigToml("[markdown]\ndone_keep = many\n"),
-    ).toThrow(/done_keep/);
+    expect(() => parseConfigToml("[markdown]\ndone_keep = many\n")).toThrow(
+      /done_keep/,
+    );
   });
 
   it("rejects malformed assignments in the top-level scope", () => {
@@ -141,6 +141,19 @@ describe("resolveConfig", () => {
     expect(fromFlag.path).toBe("/abs/from-flag.md");
   });
 
+  it("merges [cfw5001] per key: project keys win, home keys fill the rest", () => {
+    mkdirSync(join(home, ".tasks-axi"), { recursive: true });
+    writeFileSync(
+      join(home, ".tasks-axi", "config.toml"),
+      '[cfw5001]\nhome = "from-home"\ntoken_file = "/home/token"\n',
+    );
+    writeFileSync(join(dir, ".tasks.toml"), '[cfw5001]\nhome = "main"\n');
+    expect(resolveConfig({ cwd: dir, home, env: {} }).cfw5001).toEqual({
+      home: "main",
+      token_file: "/home/token",
+    });
+  });
+
   it("reads done_keep from the project toml", () => {
     writeFileSync(join(dir, ".tasks.toml"), "[markdown]\ndone_keep = 5\n");
     expect(resolveConfig({ cwd: dir, home, env: {} }).doneKeep).toBe(5);
@@ -153,14 +166,11 @@ describe("resolveConfig", () => {
     );
   });
 
-  it.each(["", "   "])(
-    "rejects an empty TASKS_AXI_FILE value %#",
-    (value) => {
-      expect(() =>
-        resolveConfig({ cwd: dir, home, env: { TASKS_AXI_FILE: value } }),
-      ).toThrow(/TASKS_AXI_FILE/);
-    },
-  );
+  it.each(["", "   "])("rejects an empty TASKS_AXI_FILE value %#", (value) => {
+    expect(() =>
+      resolveConfig({ cwd: dir, home, env: { TASKS_AXI_FILE: value } }),
+    ).toThrow(/TASKS_AXI_FILE/);
+  });
 
   it.each(["", "   "])(
     "rejects an empty markdown path from toml %#",

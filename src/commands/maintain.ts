@@ -22,6 +22,7 @@ examples:
 export const RENDER_HELP = `usage: tasks-axi render
 Normalize the backlog file: rewrite every id'd task in canonical form.
 Free-form lines are left untouched.
+cfw5001: repair rows from the fold of their events, then rewrite the render.
 flags:
   --json   print the result as a JSON object`;
 

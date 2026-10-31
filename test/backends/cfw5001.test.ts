@@ -413,6 +413,41 @@ describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
     expect(events[1].seq).toBeGreaterThan(stolen);
   });
 
+  it("a re-run of the same command replays the stored event after a failed row write", async () => {
+    let failPatch = false;
+    const flaky: typeof fetch = async (input, init) => {
+      if (
+        failPatch &&
+        init?.method === "PATCH" &&
+        String(input).includes("/api/fm_task/")
+      ) {
+        failPatch = false;
+        return new Response(JSON.stringify({ message: "injected" }), {
+          status: 503,
+        });
+      }
+      return fetch(input, init);
+    };
+    const p = probe({
+      api: new ApiTransport({
+        baseUrl: BASE,
+        tokenFile: TOKEN_FILE,
+        auth: "bearer",
+        fetch: flaky,
+      }),
+    });
+    await p.store.create({ id: p.id("a"), title: "probe a" });
+    failPatch = true;
+    await expect(
+      p.store.update(p.id("a"), { title: "renamed" }),
+    ).rejects.toThrow(/re-run the same command/);
+    expect(await eventsOf(p.id("a"))).toHaveLength(2);
+    expect((await rowOf(p.id("a"))).title).toBe("probe a");
+    await p.store.update(p.id("a"), { title: "renamed" });
+    expect(await eventsOf(p.id("a"))).toHaveLength(2);
+    expect((await rowOf(p.id("a"))).title).toBe("renamed");
+  });
+
   it("render repairs a lost PATCH from the fold of every event, long rows included", async () => {
     const { store, id } = probe();
     await store.create({ id: id("a"), title: "probe a" });

@@ -434,7 +434,7 @@ export class ApiTransport implements Transport {
       }
     } catch (error) {
       throw new AxiError(
-        `event ${seq} stored but the row write failed (${(error as Error).message}); run \`tasks-axi render\``,
+        `event ${seq} stored but the row write failed (${(error as Error).message}); re-run the same command (its key replays the stored event, then writes the row)`,
         "UNKNOWN",
       );
     }

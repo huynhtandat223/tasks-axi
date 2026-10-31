@@ -440,7 +440,7 @@ export class Cfw5001Store extends MarkdownStore {
           `${stored} of ${changes.length} task writes stored, then: ${(error as Error).message}`,
           "UNKNOWN",
           [
-            "Run `tasks-axi render` to repair the rows, then re-run the command",
+            "Re-run the same command: its key replays each stored event, then writes the row",
           ],
         );
       }

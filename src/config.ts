@@ -12,7 +12,7 @@ import { AxiError } from "./errors.js";
  *   ~/.tasks-axi/config.toml > defaults (markdown, first existing
  *   backlog.md/data/backlog.md, otherwise backlog.md).
  *
- * P1 ships only the markdown backend; the Store seam keeps sqlite/remote
+ * Backends: markdown and cfw5001 (`[cfw5001]` table); the Store seam keeps sqlite/remote
  * additions invisible to the CLI layer.
  */
 

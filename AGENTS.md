@@ -1,7 +1,7 @@
 # tasks-axi — agent notes
 
 Agent-ergonomic task/backlog CLI in the `*-axi` family, built on `axi-sdk-js` and mirroring `gh-axi`.
-P1 ships only the markdown backend behind a `Store` seam; sqlite (P2) and remote trackers (P3) are deferred.
+The markdown backend sits behind a `Store` seam; this fork adds `cfw5001` (`src/backends/cfw5001*.ts`: a `MarkdownStore` subclass that keeps the backlog in Dev 5001 `fm_task` rows and writes `data/backlog.md` as a read-only render). sqlite (P2) and remote trackers (P3) are deferred.
 
 ## Architecture
 

@@ -159,15 +159,23 @@ describe("renderRows", () => {
 });
 
 describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
-  it("pages through every row of a home", async () => {
-    const pages: string[] = [];
-    const counting: typeof fetch = (input, init) => {
-      if (String(input).includes("/api/fm_task?")) pages.push(String(input));
-      return fetch(input, init);
-    };
+  it("pages by key, so a row moved by another writer mid-read is neither skipped nor doubled", async () => {
     const p = probe();
-    for (const x of ["a", "b", "c"])
+    for (const x of ["a", "b", "c", "d"])
       await p.store.create({ id: p.id(x), title: `probe ${x}` });
+    const a = await rowOf(p.id("a"));
+    let pages = 0;
+    const racing: typeof fetch = async (input, init) => {
+      const res = await fetch(input, init);
+      if (String(input).includes("/api/fm_task?") && ++pages === 1) {
+        // a second writer moves `a` (already read) to the end before page 2
+        const moved = await api(`fm_task/${a.id}`, "PATCH", {
+          backlogSeq: 9_000_000_000,
+        });
+        expect(moved.status).toBe(200);
+      }
+      return res;
+    };
     const paged = new Cfw5001Store({
       path: `${p.path}.paged`,
       cfw: p.cfw,
@@ -175,16 +183,13 @@ describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
         baseUrl: BASE,
         tokenFile: TOKEN_FILE,
         auth: "bearer",
-        fetch: counting,
+        fetch: racing,
         pageSize: 2,
       }),
     });
-    expect((await paged.list({})).items.map((t) => t.id)).toEqual([
-      p.id("a"),
-      p.id("b"),
-      p.id("c"),
-    ]);
-    expect(pages).toHaveLength(2);
+    const ids = (await paged.list({})).items.map((t) => t.id).sort();
+    expect(ids).toEqual([p.id("a"), p.id("b"), p.id("c"), p.id("d")]);
+    expect(pages).toBe(3);
   });
 
   it("writes one event and one PATCH per changed task and reads every field back", async () => {

@@ -300,17 +300,33 @@ export class ApiTransport implements Transport {
     );
   }
 
-  private async listAll(table: string, filter: string, orderby: string) {
-    const out: Row[] = [];
+  /**
+   * Every row matching `filter`, paged by key (`key gt <last>`, ties on `id`)
+   * rather than by offset, so a row whose key changes mid-read (a concurrent
+   * move) is never skipped; a row seen twice keeps its newer copy.
+   */
+  private async listAll(table: string, filter: string, key: string) {
+    const byId = new Map<string, Row>();
     const size = this.options.pageSize ?? 100;
-    for (let skip = 0; ; skip += size) {
-      const q = `$top=${size}&$skip=${skip}&$orderby=${encodeURIComponent(orderby)}&$filter=${encodeURIComponent(filter)}`;
+    let after = "";
+    for (;;) {
+      const where = after ? `(${filter}) and (${after})` : filter;
+      const q = `$top=${size}&$orderby=${encodeURIComponent(`${key},id`)}&$filter=${encodeURIComponent(where)}`;
       const page = (this.ok(
         await this.http("GET", `/api/${table}?${q}`),
         `list ${table}`,
       )?.value ?? []) as Row[];
-      out.push(...page);
-      if (page.length < size) return out;
+      for (const row of page) {
+        byId.delete(row.id);
+        byId.set(row.id, row);
+      }
+      if (page.length < size) return [...byId.values()];
+      const last = page[page.length - 1];
+      const value = last[key];
+      after =
+        value === null || value === undefined
+          ? `(${key} eq null and id gt ${last.id}) or ${key} ne null`
+          : `${key} gt ${String(value)} or (${key} eq ${String(value)} and id gt ${last.id})`;
     }
   }
 

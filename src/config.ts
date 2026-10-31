@@ -266,8 +266,10 @@ export function resolveConfig(overrides: ConfigOverrides = {}): ResolvedConfig {
   );
 
   const config: ResolvedConfig = { backend, path, doneKeep };
-  const cfw5001 = projectToml.cfw5001 ?? homeToml.cfw5001;
-  if (cfw5001) config.cfw5001 = { ...cfw5001 };
+  // Per key, like [markdown]: a project key wins over the same key in ~/.tasks-axi.
+  if (projectToml.cfw5001 || homeToml.cfw5001) {
+    config.cfw5001 = { ...homeToml.cfw5001, ...projectToml.cfw5001 };
+  }
   if (archive) {
     config.archivePath = isAbsolute(archive) ? archive : resolve(cwd, archive);
   }

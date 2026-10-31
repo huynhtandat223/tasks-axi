@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -529,6 +530,21 @@ describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
     expect(result.ids).toEqual([id("b"), id("a")]);
     expect((await rowOf(id("a"))).section).toBeNull();
     expect((await rowOf(id("c"))).section).toBe("Done");
+  });
+
+  it("writes no archive file: prune keeps rows, an archived body rides in the event", async () => {
+    const { store, dir, id } = probe();
+    await store.create({ id: id("a"), title: "probe a", body: "old body" });
+    await store.update(id("a"), { body: "new body", archiveBody: true });
+    const last = (await eventsOf(id("a"))).at(-1)!;
+    expect(bodyOf(last).archivedBody).toContain("old body");
+    for (const x of ["b", "c"]) {
+      await store.create({ id: id(x), title: `probe ${x}` });
+      await store.transition(id(x), "done");
+    }
+    await store.prune({ state: "done", keep: 1, archive: true });
+    expect((await rowOf(id("b"))).section).toBeNull();
+    expect(readdirSync(dir)).toEqual([]);
   });
 
   it("never falls back to the DB on a refused (401) answer", async () => {

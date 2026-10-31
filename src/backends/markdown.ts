@@ -766,7 +766,7 @@ export class MarkdownStore implements Store {
         archiveRestorePoint = this.captureArchiveRestorePoint(
           this.noteArchivePath,
         );
-        this.appendNoteArchive(renderTaskLines(archivedTask));
+        this.appendNoteArchive(renderTaskLines(archivedTask), archivedTask.id);
         markChanged("archive");
       }
       try {
@@ -1211,7 +1211,7 @@ export class MarkdownStore implements Store {
     });
   }
 
-  private captureArchiveRestorePoint(
+  protected captureArchiveRestorePoint(
     path: string = this.archivePath,
   ): ArchiveRestorePoint {
     try {
@@ -1222,7 +1222,7 @@ export class MarkdownStore implements Store {
     }
   }
 
-  private restoreArchive(
+  protected restoreArchive(
     point: ArchiveRestorePoint,
     path: string = this.archivePath,
   ): void {
@@ -1242,11 +1242,12 @@ export class MarkdownStore implements Store {
     }
   }
 
-  private appendArchive(lines: string[]): void {
+  protected appendArchive(lines: string[]): void {
     this.appendArchiveBlock(this.archivePath, lines);
   }
 
-  private appendNoteArchive(lines: string[]): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  protected appendNoteArchive(lines: string[], _id: string): void {
     this.appendArchiveBlock(this.noteArchivePath, lines);
   }
 

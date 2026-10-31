@@ -241,6 +241,7 @@ function docTasks(doc: BacklogDoc): Task[] {
 
 export class Cfw5001Store extends MarkdownStore {
   private readonly renderPath: string;
+  private readonly archivedBodies = new Map<string, string>();
   private readonly cfw: Cfw5001Settings;
   private readonly env: NodeJS.ProcessEnv;
   private transport: Transport;
@@ -421,6 +422,8 @@ export class Cfw5001Store extends MarkdownStore {
         file: this.renderPath,
         row,
       };
+      const archivedBody = this.archivedBodies.get(change.id);
+      if (archivedBody !== undefined) spec.archivedBody = archivedBody;
       if (!row) {
         const kind = String(change.set.backlogKind ?? "");
         spec.defaults = {
@@ -455,6 +458,23 @@ export class Cfw5001Store extends MarkdownStore {
     }
   }
 
+  // The DB is the archive: a pruned task keeps its row (section null) and its
+  // events, and a superseded body rides in the row event. No archive file.
+  protected override captureArchiveRestorePoint(): {
+    existed: boolean;
+    size: number;
+  } {
+    return { existed: false, size: 0 };
+  }
+
+  protected override restoreArchive(): void {}
+
+  protected override appendArchive(): void {}
+
+  protected override appendNoteArchive(lines: string[], id: string): void {
+    this.archivedBodies.set(id, lines.join("\n"));
+  }
+
   /** The cross-process write lock: under the OS temp dir, keyed by home. */
   private get lockPath(): string {
     const key = this.cfw.home.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -472,6 +492,7 @@ export class Cfw5001Store extends MarkdownStore {
       } finally {
         this.cache = undefined;
         this.pending = false;
+        this.archivedBodies.clear();
       }
     };
     const next = this.queue.then(() =>

@@ -250,12 +250,12 @@ describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
     expect((await reader.get(id("b")))?.deps).toEqual([
       { type: "blocked-by", id: id("a"), reason: "needs a" },
     ]);
-    expect(readFileSync(path, "utf8")).toContain(`- [ ] ${id("a")} - probe a`);
+    expect(existsSync(path)).toBe(false);
     expect(existsSync(`${path}.reader`)).toBe(false);
   });
 
   it("matches the markdown backend's render for the same verb sequence", async () => {
-    const { store, path, dir, id } = probe();
+    const { store, home, dir, id } = probe();
     const mdPath = join(dir, "md.md");
     const md = new MarkdownStore({ path: mdPath, now: () => "2026-10-31" });
     for (const s of [store, md]) {
@@ -276,7 +276,13 @@ describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
     }
     const tail = (p: string) =>
       readFileSync(p, "utf8").split("\n").slice(1).join("\n");
-    expect(tail(path)).toBe(tail(mdPath));
+    const rows = await new ApiTransport({
+      baseUrl: BASE,
+      tokenFile: TOKEN_FILE,
+      auth: "bearer",
+    }).listHome(home);
+    const rendered = renderRows(rows, home).split("\n").slice(1).join("\n");
+    expect(rendered).toBe(tail(mdPath));
   });
 
   it("removes by clearing the section and revives the same row on add", async () => {

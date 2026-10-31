@@ -262,7 +262,7 @@ Backends sit behind a narrow `Store` interface so additional backends slot in wi
 
 `backend = "cfw5001"` keeps the backlog in Dev 5001 `fm_task` rows of one home (`backlog_home`).
 Every verb runs `MarkdownStore`'s own rules on a doc rendered from the rows, then writes one `fm_task_event` and one row PATCH per changed task; `rm` and prune clear the row's `section` and never delete.
-`[markdown] path` becomes a read-only render, rewritten after each write.
+The backend writes no markdown file: `[markdown] path` is never written, and `tasks-axi render` only repairs rows and prints their count.
 When the API gives no answer, the command fails, unless `[cfw5001] db` or `TASKS_AXI_CFW5001_DB` names the host SQLite file for that run; set it only with the owner's permission. Then the command reads and writes that file instead. A refused (4xx/5xx) answer never falls back.
 
 ```toml

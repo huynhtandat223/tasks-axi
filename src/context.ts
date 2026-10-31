@@ -65,12 +65,8 @@ export function createStore(
       );
     }
     const abs = (p: string) => (isAbsolute(p) ? p : resolve(cwd, p));
-    const db =
-      toml.db ??
-      join(
-        home,
-        ".local/share/cfw-deployments/cfw-forge-dev-5001-data/runtime-api/managed/forge.db",
-      );
+    // The DB is read only when the owner names it for a run; no default path.
+    const db = toml.db ?? env.TASKS_AXI_CFW5001_DB;
     return new Cfw5001Store({
       ...base,
       env,
@@ -87,7 +83,7 @@ export function createStore(
             ),
         ),
         auth,
-        db: abs(db),
+        ...(db ? { db: abs(db) } : {}),
       },
     });
   }

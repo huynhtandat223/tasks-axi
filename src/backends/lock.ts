@@ -76,13 +76,9 @@ function releaseLock(lockPath: string, token: string): void {
 function lockedError(lockPath: string, staleMs: number): AxiError {
   try {
     if (Date.now() - statSync(lockPath).mtimeMs > staleMs) {
-      return new AxiError(
-        `backlog lock looks stale: ${lockPath}`,
-        "LOCKED",
-        [
-          `If no tasks-axi process is running, remove ${lockPath} and retry`,
-        ],
-      );
+      return new AxiError(`backlog lock looks stale: ${lockPath}`, "LOCKED", [
+        `If no tasks-axi process is running, remove ${lockPath} and retry`,
+      ]);
     }
   } catch (error) {
     if (errno(error) !== "ENOENT") throw error;

@@ -48,6 +48,8 @@ export interface WriteSpec {
   actorRole: string;
   /** The `file` the event names (the render path), for firstmate's view reader. */
   file: string;
+  /** A body `update --archive-body` superseded; kept in the event, never a file. */
+  archivedBody?: string;
   /** The existing row, or null to create one with `defaults`. */
   row: Row | null;
   defaults?: Record<string, unknown>;
@@ -66,9 +68,7 @@ export interface Transport {
 /** Raised when the API gives no answer (connection refused, timeout). */
 export class NoAnswerError extends AxiError {
   constructor(message: string) {
-    super(message, "UNKNOWN", [
-      "Check that Dev 5001 is running, or set `[cfw5001] db` for the offline path",
-    ]);
+    super(message, "UNKNOWN", ["Check that Dev 5001 is running"]);
   }
 }
 
@@ -97,7 +97,15 @@ export function eventBody(
   offline = false,
 ): { body: string; documents?: Array<Record<string, string>> } {
   const note = offline ? `${spec.note} (offline)` : spec.note;
-  const body = JSON.stringify({ v: 1, note, set, file: spec.file });
+  const archived =
+    spec.archivedBody === undefined ? {} : { archivedBody: spec.archivedBody };
+  const body = JSON.stringify({
+    v: 1,
+    note,
+    set,
+    file: spec.file,
+    ...archived,
+  });
   if (body.length <= EVENT_BODY_LIMIT - EVENT_STAGE_BUDGET) return { body };
   const { row, notes, ...rest } = set;
   const small = JSON.stringify({
@@ -105,6 +113,7 @@ export function eventBody(
     note,
     set: { ...rest, rowDocument: true },
     file: spec.file,
+    ...archived,
   });
   if (small.length > EVENT_BODY_LIMIT) {
     throw new AxiError(

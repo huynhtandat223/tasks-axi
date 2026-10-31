@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
+import { join } from "node:path";
 import { AxiError } from "../errors.js";
 import type {
   Dep,
@@ -24,7 +25,7 @@ import {
   type WriteSpec,
   sha16,
 } from "./cfw5001-transport.js";
-import { atomicWrite, withLock } from "./lock.js";
+import { withLock } from "./lock.js";
 import {
   type BacklogDoc,
   deriveLinks,
@@ -47,7 +48,7 @@ import {
  * `persist` only captures the new doc), then awaits a flush that diffs the
  * new doc against the loaded rows, re-reads each changed row, refuses on a
  * change made meanwhile, and writes one `fm_task_event` plus the row PATCH
- * per changed task. The markdown file at `path` is a read-only render.
+ * per changed task. It writes no markdown file; the rows are the backlog.
  */
 
 export interface Cfw5001Settings {
@@ -240,6 +241,7 @@ function docTasks(doc: BacklogDoc): Task[] {
 
 export class Cfw5001Store extends MarkdownStore {
   private readonly renderPath: string;
+  private readonly archivedBodies = new Map<string, string>();
   private readonly cfw: Cfw5001Settings;
   private readonly env: NodeJS.ProcessEnv;
   private transport: Transport;
@@ -300,7 +302,14 @@ export class Cfw5001Store extends MarkdownStore {
     try {
       return await this.transport.listHome(this.cfw.home);
     } catch (error) {
-      if (!(error instanceof NoAnswerError) || !this.offline) throw error;
+      if (!(error instanceof NoAnswerError)) throw error;
+      if (!this.offline) {
+        throw new AxiError(
+          `Dev 5001 at ${this.cfw.baseUrl} gave no answer; reading the DB needs the owner's permission (set TASKS_AXI_CFW5001_DB=<path> for that run)`,
+          "UNKNOWN",
+          ["Check that Dev 5001 is running"],
+        );
+      }
       if (this.cfw.db && !existsSync(this.cfw.db)) throw error;
       // The API gave no answer: this command reads and writes the host DB.
       this.transport = this.offline;
@@ -413,6 +422,8 @@ export class Cfw5001Store extends MarkdownStore {
         file: this.renderPath,
         row,
       };
+      const archivedBody = this.archivedBodies.get(change.id);
+      if (archivedBody !== undefined) spec.archivedBody = archivedBody;
       if (!row) {
         const kind = String(change.set.backlogKind ?? "");
         spec.defaults = {
@@ -445,11 +456,29 @@ export class Cfw5001Store extends MarkdownStore {
         );
       }
     }
-    if (changes.length > 0 || !existsSync(this.renderPath)) this.writeRender();
   }
 
-  private writeRender(): void {
-    atomicWrite(this.renderPath, this.cache ?? "");
+  // The DB is the archive: a pruned task keeps its row (section null) and its
+  // events, and a superseded body rides in the row event. No archive file.
+  protected override captureArchiveRestorePoint(): {
+    existed: boolean;
+    size: number;
+  } {
+    return { existed: false, size: 0 };
+  }
+
+  protected override restoreArchive(): void {}
+
+  protected override appendArchive(): void {}
+
+  protected override appendNoteArchive(lines: string[], id: string): void {
+    this.archivedBodies.set(id, lines.join("\n"));
+  }
+
+  /** The cross-process write lock: under the OS temp dir, keyed by home. */
+  private get lockPath(): string {
+    const key = this.cfw.home.replace(/[^A-Za-z0-9._-]/g, "_");
+    return join(tmpdir(), `tasks-axi-cfw5001-${key}`);
   }
 
   /** Serialize calls in this process; writes also hold a cross-process lock. */
@@ -463,10 +492,11 @@ export class Cfw5001Store extends MarkdownStore {
       } finally {
         this.cache = undefined;
         this.pending = false;
+        this.archivedBodies.clear();
       }
     };
     const next = this.queue.then(() =>
-      verb === null ? go() : withLock(`${this.renderPath}.cfw5001`, go),
+      verb === null ? go() : withLock(this.lockPath, go),
     );
     this.queue = next.catch(() => undefined);
     return next;
@@ -544,11 +574,11 @@ export class Cfw5001Store extends MarkdownStore {
 
   /**
    * Repair every home row from the fold of its events (a PATCH lost after a
-   * stored event), then rewrite the render. Returns the task count.
+   * stored event). Writes no file. Returns the task count.
    */
   override render(): Promise<number> {
     return this.run(null, async () => {
-      return withLock(`${this.renderPath}.cfw5001`, async () => {
+      return withLock(this.lockPath, async () => {
         for (const { row } of this.loaded.values()) {
           const set = await this.transport.foldedSet(row.taskId);
           if (!set) continue;
@@ -571,8 +601,6 @@ export class Cfw5001Store extends MarkdownStore {
           });
         }
         const rows = await this.transport.listHome(this.cfw.home);
-        this.cache = renderRows(rows, this.cfw.home);
-        this.writeRender();
         return rows.length;
       });
     });

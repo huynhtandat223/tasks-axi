@@ -543,15 +543,15 @@ export class Cfw5001Store extends MarkdownStore {
   }
 
   /**
-   * Repair every home row from its newest row event (a PATCH lost after a
+   * Repair every home row from the fold of its events (a PATCH lost after a
    * stored event), then rewrite the render. Returns the task count.
    */
   override render(): Promise<number> {
     return this.run(null, async () => {
       return withLock(`${this.renderPath}.cfw5001`, async () => {
         for (const { row } of this.loaded.values()) {
-          const set = await this.transport.newestSet(row.taskId);
-          if (!set || set.rowDocument) continue;
+          const set = await this.transport.foldedSet(row.taskId);
+          if (!set) continue;
           const repair: BacklogSet = {};
           for (const col of BACKLOG_COLUMNS) {
             if (col in set && norm(set[col]) !== norm(row[col]))

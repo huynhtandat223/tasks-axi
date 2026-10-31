@@ -59,8 +59,8 @@ export interface Transport {
   getRow(taskId: string): Promise<Row | null>;
   /** Append the event and patch/create the row; returns the event seq. */
   write(spec: WriteSpec): Promise<number>;
-  /** The `set` of the newest row/created event of a task, for `render` repair. */
-  newestSet(taskId: string): Promise<Record<string, unknown> | null>;
+  /** The backlog columns folded from every event of a task, for `render` repair. */
+  foldedSet(taskId: string): Promise<Record<string, unknown> | null>;
 }
 
 /** Raised when the API gives no answer (connection refused, timeout). */
@@ -131,6 +131,46 @@ function bodySet(body: unknown): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Fold the backlog columns of a task's events (oldest first): each column
+ * takes the value of the newest event whose `set` carries it. A row too long
+ * for one body lives in a documents child (`<row>\n<notes>`), read only for
+ * the newest event that carries row text, like the firstmate writer's fold.
+ */
+export async function foldEvents(
+  events: Array<{ id: string; body?: unknown }>,
+  readDocument: (eventId: string) => Promise<string | null>,
+): Promise<Record<string, unknown> | null> {
+  if (events.length === 0) return null;
+  const folded: Record<string, unknown> = {};
+  let carrier: { id: string } | undefined;
+  for (const event of events) {
+    const set = bodySet(event.body);
+    if (!set) continue;
+    for (const col of BACKLOG_COLUMNS) if (col in set) folded[col] = set[col];
+    if (set.rowDocument) {
+      carrier = event;
+      delete folded.row;
+      delete folded.notes;
+    } else if ("row" in set) {
+      carrier = undefined;
+    }
+  }
+  if (carrier) {
+    const content = await readDocument(carrier.id);
+    if (content === null) {
+      throw new AxiError(
+        `the row document of event ${carrier.id} is missing`,
+        "UNKNOWN",
+      );
+    }
+    const cut = content.indexOf("\n");
+    folded.row = content.slice(0, cut);
+    folded.notes = content.slice(cut + 1);
+  }
+  return folded;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -295,13 +335,19 @@ export class ApiTransport implements Transport {
     return this.first("fm_task", `taskId eq ${lit(taskId)}`);
   }
 
-  async newestSet(taskId: string) {
-    const event = await this.first(
+  async foldedSet(taskId: string) {
+    const events = await this.listAll(
       "fm_task_event",
-      `taskId eq ${lit(taskId)} and (kind eq 'row' or kind eq 'created')`,
-      "seq desc",
+      `taskId eq ${lit(taskId)}`,
+      "seq",
     );
-    return event ? bodySet(event.body) : null;
+    return foldEvents(events, async (eventId) => {
+      const doc = await this.first(
+        "fm_event_document",
+        `fmTaskEventId eq ${eventId}`,
+      );
+      return doc ? String(doc.content) : null;
+    });
   }
 
   private eventByKey(key: string) {
@@ -464,15 +510,22 @@ export class SqliteTransport implements Transport {
     }
   }
 
-  async newestSet(taskId: string) {
+  async foldedSet(taskId: string) {
     const db = await this.open(true);
     try {
-      const raw = db
+      const events = db
         .prepare(
-          "SELECT body FROM fm_task_event WHERE task_id = ? AND kind IN ('row','created') ORDER BY seq DESC LIMIT 1",
+          "SELECT id, body FROM fm_task_event WHERE task_id = ? ORDER BY seq",
         )
-        .get(taskId);
-      return raw ? bodySet(raw.body) : null;
+        .all(taskId) as Array<{ id: string; body: unknown }>;
+      return await foldEvents(events, async (eventId) => {
+        const doc = db
+          .prepare(
+            "SELECT content FROM fm_event_document WHERE fm_task_event_id = ? LIMIT 1",
+          )
+          .get(eventId);
+        return doc ? String(doc.content) : null;
+      });
     } finally {
       db.close();
     }

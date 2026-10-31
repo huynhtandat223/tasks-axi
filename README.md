@@ -279,7 +279,7 @@ home = "main"                      # required: the backlog_home this checkout ow
 # db = "..."                          (offline SQLite file; default: the Dev 5001 forge.db)
 ```
 
-`tasks-axi render` repairs each row from its newest row event (a PATCH lost after a stored event), then rewrites the render.
+`tasks-axi render` repairs each row from the fold of its events (each column from the newest event that sets it, a long row from its document child), then rewrites the render.
 `mv` between backlog files is not supported.
 
 ## Development

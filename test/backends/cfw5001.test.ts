@@ -413,6 +413,45 @@ describe.skipIf(!live)("Cfw5001Store on Dev 5001", { timeout: 60000 }, () => {
     expect(events[1].seq).toBeGreaterThan(stolen);
   });
 
+  it("render repairs a lost PATCH from the fold of every event, long rows included", async () => {
+    const { store, id } = probe();
+    await store.create({ id: id("a"), title: "probe a" });
+    await store.create({ id: id("b"), title: "probe b" });
+    const long = Array.from(
+      { length: 120 },
+      (_, i) => `line ${i} ${"y".repeat(70)}`,
+    ).join("\n");
+    await store.update(id("b"), { body: long });
+    await store.update(id("a"), { hold: { reason: "older hold" } });
+    await store.update(id("a"), { hold: { reason: "newer hold" } });
+    const a = await rowOf(id("a"));
+    const b = await rowOf(id("b"));
+    // Simulate PATCHes lost after their events were stored.
+    expect(
+      (
+        await api(`fm_task/${a.id}`, "PATCH", {
+          backlogHoldReason: "stale",
+          title: "stale",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await api(`fm_task/${b.id}`, "PATCH", { notes: "  stale\n" })).status,
+    ).toBe(200);
+    expect(await store.render()).toBe(2);
+    expect(await rowOf(id("a"))).toMatchObject({
+      backlogHoldReason: "newer hold",
+      title: "probe a",
+    });
+    expect((await rowOf(id("b"))).notes).toBe(
+      `${long
+        .split("\n")
+        .map((l) => `  ${l}`)
+        .join("\n")}\n`,
+    );
+    expect((await store.get(id("b")))?.body).toBe(long);
+  });
+
   it("carries a long row in a documents child and reads it back whole", async () => {
     const { store, cfw, path, id } = probe();
     await store.create({ id: id("a"), title: "probe a" });

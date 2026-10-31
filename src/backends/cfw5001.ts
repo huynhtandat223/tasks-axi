@@ -24,7 +24,7 @@ import {
   type WriteSpec,
   sha16,
 } from "./cfw5001-transport.js";
-import { atomicWrite, readFileSafe, withLock } from "./lock.js";
+import { atomicWrite, withLock } from "./lock.js";
 import {
   type BacklogDoc,
   deriveLinks,
@@ -178,22 +178,16 @@ export function renderRows(rows: Row[], home: string): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** The backlog columns of a Task, `row`/`notes` from its canonical lines (or `raw`). */
-export function taskToSet(
-  task: Task,
-  home: string,
-  raw?: string[],
-): BacklogSet {
+/** The backlog columns of a Task; `row` and `notes` come from its canonical lines. */
+export function taskToSet(task: Task, home: string): BacklogSet {
   if (task.title.length > TITLE_LIMIT) {
     throw new AxiError(
       `title is ${task.title.length} characters; fm_task.title holds ${TITLE_LIMIT}`,
       "VALIDATION_ERROR",
     );
   }
-  const lines = raw && raw.length > 0 ? raw : renderTaskLines(task);
-  const header = lines[0]
-    .replace(/^- \[[ x]\] /, "")
-    .replace(/^- \*\*([^*]+)\*\* /, "$1 ");
+  const lines = renderTaskLines(task);
+  const header = lines[0].replace(/^- \[[ x]\] /, "");
   const rest = lines
     .slice(1)
     .filter((line) => !line.includes("tasks-axi:public-followup"));
@@ -236,18 +230,12 @@ const content = (set: BacklogSet): BacklogSet =>
     ),
   );
 
-function docTasks(
-  doc: BacklogDoc,
-): Array<{ task: Task; raw: string[]; dirty: boolean }> {
-  const out: Array<{ task: Task; raw: string[]; dirty: boolean }> = [];
-  for (const section of doc.sections) {
-    for (const entry of section.entries) {
-      if (entry.kind === "task") {
-        out.push({ task: entry.task, raw: entry.raw, dirty: entry.dirty });
-      }
-    }
-  }
-  return out;
+function docTasks(doc: BacklogDoc): Task[] {
+  return doc.sections.flatMap((section) =>
+    section.entries.flatMap((entry) =>
+      entry.kind === "task" ? [entry.task] : [],
+    ),
+  );
 }
 
 export class Cfw5001Store extends MarkdownStore {
@@ -327,7 +315,7 @@ export class Cfw5001Store extends MarkdownStore {
     // The loaded sets come from the parsed render, so an untouched task diffs equal.
     const byId = new Map(rows.map((row) => [row.taskId, row]));
     this.loaded = new Map();
-    for (const { task } of docTasks(parseBacklog(this.cache))) {
+    for (const task of docTasks(parseBacklog(this.cache))) {
       const row = byId.get(task.id);
       if (!row) continue;
       this.loaded.set(task.id, {
@@ -350,7 +338,7 @@ export class Cfw5001Store extends MarkdownStore {
     const doc = parseBacklog(this.cache ?? "");
     const changes: Change[] = [];
     const seen = new Set<string>();
-    for (const { task } of docTasks(doc)) {
+    for (const task of docTasks(doc)) {
       seen.add(task.id);
       const set = taskToSet(task, this.cfw.home);
       const loaded = this.loaded.get(task.id);
@@ -440,6 +428,8 @@ export class Cfw5001Store extends MarkdownStore {
           surface: null,
           holdUntil: null,
         };
+        // The created event carries the contract defaults too, so the writer's fold sees a whole row.
+        spec.set = { ...spec.defaults, ...spec.set };
       }
       try {
         await this.transport.write(spec);
@@ -587,87 +577,4 @@ export class Cfw5001Store extends MarkdownStore {
       });
     });
   }
-
-  /**
-   * One-shot import of a markdown backlog into this home: one `row` (or
-   * `created`) event per task whose columns differ, keyed by a content hash so
-   * a re-run records only changed values. Placement follows the file order.
-   */
-  backfillFromMarkdown(
-    source: string,
-  ): Promise<{ written: number; unchanged: number }> {
-    return withLock(`${this.renderPath}.cfw5001`, async () => {
-      const text = readSource(source);
-      const doc = parseBacklog(text);
-      const bySection = new Map<State, Array<{ task: Task; raw: string[] }>>();
-      for (const item of docTasks(doc)) {
-        const list = bySection.get(item.task.state) ?? [];
-        list.push(item);
-        bySection.set(item.task.state, list);
-      }
-      // In flight and Done render newest first, so their file order is replayed bottom-up.
-      const ordered = [
-        ...(bySection.get("in_flight") ?? []).reverse(),
-        ...(bySection.get("queued") ?? []),
-        ...(bySection.get("done") ?? []).reverse(),
-      ];
-      const who = this.who();
-      let written = 0;
-      let unchanged = 0;
-      for (const { task, raw } of ordered) {
-        const set = taskToSet(task, this.cfw.home, raw);
-        const row = await this.transport.getRow(task.id);
-        const keep =
-          row &&
-          row.backlogHome === this.cfw.home &&
-          row.section === set.section &&
-          row.backlogSeq != null;
-        if (
-          row &&
-          keep &&
-          sameValues(
-            row,
-            set,
-            COMPARED.filter((c) => c !== "backlogSeq"),
-          )
-        ) {
-          unchanged++;
-          continue;
-        }
-        const spec: WriteSpec = {
-          taskId: task.id,
-          kind: row ? "row" : "created",
-          note: "tasks-axi backfill",
-          set: { ...set, backlogSeq: keep && row ? row.backlogSeq : null },
-          placeSeq: !keep,
-          key: `axi-backfill:${task.id}:${sha16(content(set))}`,
-          ...who,
-          file: this.renderPath,
-          row,
-        };
-        if (!row) {
-          spec.defaults = {
-            state: "triage",
-            assignee: task.id.slice(0, 64),
-            nextActor: "firstmate",
-            kind: CONTRACT_KINDS.includes(task.kind ?? "")
-              ? task.kind
-              : "other",
-            blockRepeats: 0,
-          };
-        }
-        await this.transport.write(spec);
-        written++;
-      }
-      return { written, unchanged };
-    });
-  }
-}
-
-function readSource(path: string): string {
-  const text = readFileSafe(path);
-  if (text === undefined) {
-    throw new AxiError(`markdown backlog not found: ${path}`, "NOT_FOUND");
-  }
-  return text;
 }

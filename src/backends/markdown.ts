@@ -73,7 +73,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEP_REASON_EDGE_MARKER_RE =
   /(?:^|\s)(?:blocked-by|parent|discovered-from):\s/;
 
-interface LoadedBacklogDoc {
+export interface LoadedBacklogDoc {
   doc: BacklogDoc;
   source: string | undefined;
 }
@@ -346,7 +346,7 @@ export class MarkdownStore implements Store {
   // Read helpers
   // -------------------------------------------------------------------------
 
-  private loadSource(): string | undefined {
+  protected loadSource(): string | undefined {
     return readFileSafe(this.path);
   }
 
@@ -487,7 +487,7 @@ export class MarkdownStore implements Store {
     }
   }
 
-  private persist(loaded: LoadedBacklogDoc): void {
+  protected persist(loaded: LoadedBacklogDoc): void {
     this.assertUnchanged(loaded);
     atomicWrite(this.path, renderBacklog(loaded.doc));
   }

@@ -5,6 +5,7 @@ import {
   takeBoolFlag,
   takeFlag,
 } from "../args.js";
+import { Cfw5001Store } from "../backends/cfw5001.js";
 import { renderMutation } from "../confirm.js";
 import { requireCtx, type TasksContext } from "../context.js";
 import { unsupported } from "../errors.js";
@@ -19,10 +20,12 @@ flags:
 examples:
   tasks-axi prune --keep 10`;
 
-export const RENDER_HELP = `usage: tasks-axi render
+export const RENDER_HELP = `usage: tasks-axi render [--from-markdown <path>]
 Normalize the backlog file: rewrite every id'd task in canonical form.
 Free-form lines are left untouched.
+cfw5001: repair rows from their newest event, then rewrite the render.
 flags:
+  --from-markdown <path>   cfw5001 only: import a markdown backlog into this home (re-runs write only changed tasks)
   --json   print the result as a JSON object`;
 
 export async function pruneCommand(
@@ -69,7 +72,20 @@ export async function renderCommand(
   const { store } = requireCtx(context);
   const args = [...rawArgs];
   const json = takeBoolFlag(args, "--json");
+  const from = takeFlag(args, "--from-markdown");
   requirePositionals(args, 0, 0, RENDER_HELP.split("\n")[0]);
+  if (from !== undefined) {
+    if (!(store instanceof Cfw5001Store)) {
+      throw unsupported("render --from-markdown", store.capabilities().backend);
+    }
+    const result = await store.backfillFromMarkdown(from);
+    return renderMutation({
+      json,
+      confirm: `render -> backfilled ${result.written} (unchanged ${result.unchanged})`,
+      jsonPayload: { ok: true, action: "render", ...result },
+      suggestions: [],
+    });
+  }
   if (!store.render) {
     throw unsupported("render", store.capabilities().backend);
   }

@@ -23,7 +23,19 @@ export interface ResolvedConfig {
   /** Optional archive path for pruned tasks (resolved to an absolute path). */
   archivePath?: string;
   doneKeep: number;
+  /** `[cfw5001]` table values (snake_case keys), present only when set. */
+  cfw5001?: Cfw5001Toml;
 }
+
+export interface Cfw5001Toml {
+  home?: string;
+  base_url?: string;
+  token_file?: string;
+  auth?: string;
+  db?: string;
+}
+
+const CFW5001_KEYS = ["home", "base_url", "token_file", "auth", "db"] as const;
 
 export interface ConfigOverrides {
   backend?: string;
@@ -40,11 +52,12 @@ interface TomlConfig {
     archive?: string;
     done_keep?: number;
   };
+  cfw5001?: Cfw5001Toml;
 }
 
 const DEFAULT_KEEP = 10;
 const PATH_CANDIDATES = ["backlog.md", "data/backlog.md"];
-type ConfigTable = "root" | "markdown" | "unsupported";
+type ConfigTable = "root" | "markdown" | "cfw5001" | "unsupported";
 
 /**
  * Minimal TOML reader for the tiny config surface we need: a top-level
@@ -62,7 +75,8 @@ export function parseConfigToml(src: string): TomlConfig {
 
     const section = line.match(/^\[([^\]]+)\]$/);
     if (section) {
-      table = section[1].trim() === "markdown" ? "markdown" : "unsupported";
+      const name = section[1].trim();
+      table = name === "markdown" || name === "cfw5001" ? name : "unsupported";
       continue;
     }
 
@@ -83,6 +97,14 @@ export function parseConfigToml(src: string): TomlConfig {
 
     if (table === "root") {
       config.backend = requireTomlString(value, source);
+      continue;
+    }
+    if (table === "cfw5001") {
+      config.cfw5001 ??= {};
+      config.cfw5001[key as (typeof CFW5001_KEYS)[number]] = requireTomlString(
+        value,
+        source,
+      );
       continue;
     }
     config.markdown ??= {};
@@ -121,11 +143,14 @@ function stripTomlComment(raw: string): string {
   return raw;
 }
 
-function configKeySource(
-  table: ConfigTable,
-  key: string,
-): string | undefined {
+function configKeySource(table: ConfigTable, key: string): string | undefined {
   if (table === "root" && key === "backend") return "backend";
+  if (
+    table === "cfw5001" &&
+    (CFW5001_KEYS as readonly string[]).includes(key)
+  ) {
+    return `cfw5001.${key}`;
+  }
   if (
     table === "markdown" &&
     (key === "path" || key === "archive" || key === "done_keep")
@@ -241,6 +266,8 @@ export function resolveConfig(overrides: ConfigOverrides = {}): ResolvedConfig {
   );
 
   const config: ResolvedConfig = { backend, path, doneKeep };
+  const cfw5001 = projectToml.cfw5001 ?? homeToml.cfw5001;
+  if (cfw5001) config.cfw5001 = { ...cfw5001 };
   if (archive) {
     config.archivePath = isAbsolute(archive) ? archive : resolve(cwd, archive);
   }

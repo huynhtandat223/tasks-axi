@@ -479,6 +479,15 @@ export class SqliteTransport implements Transport {
   }
 
   async write(spec: WriteSpec): Promise<number> {
+    // Offline writes only go to a regular local file this user owns.
+    const info = lstatSync(this.path);
+    const uid = process.getuid?.();
+    if (!info.isFile() || (uid !== undefined && info.uid !== uid)) {
+      throw new AxiError(
+        `offline write refused: ${this.path} is not a regular file you own`,
+        "VALIDATION_ERROR",
+      );
+    }
     const db = await this.open(false);
     try {
       db.exec("BEGIN IMMEDIATE");

@@ -17,12 +17,14 @@ import {
 } from "../../src/backends/cfw5001-transport.js";
 import { MarkdownStore } from "../../src/backends/markdown.js";
 import { AxiError } from "../../src/errors.js";
+import { canCleanUp, deleteProbeTasks } from "./cfw5001-cleanup.js";
 
 /**
  * The cfw5001 backend against the real Dev 5001 (no fakes). Every write goes
- * to a probe home (`backlog_home = probe-test-<run>-<n>`) with run-unique ids;
- * probe rows cannot be deleted and end with `section: null`. The suite skips
- * when 5001 or its token is not on this machine (CI).
+ * to a probe home (`backlog_home = probe-test-<run>-<n>`) with run-unique ids,
+ * and the after hook deletes those rows with their events, documents and
+ * links (`cfw5001-cleanup.ts`), pass or fail. The suite skips when 5001, its
+ * token or the SysAdmin login is not on this machine (CI).
  */
 
 const BASE = process.env.FM_TASK_BASE_URL ?? "http://127.0.0.1:5001";
@@ -49,7 +51,8 @@ async function reachable(): Promise<boolean> {
     return false;
   }
 }
-const live = await reachable();
+// Writes need the SysAdmin login too: the after hook deletes every probe row it made.
+const live = (await reachable()) && canCleanUp();
 
 async function api(path: string, method = "GET", body?: unknown) {
   const token = readFileSync(TOKEN_FILE, "utf8").trim();
@@ -77,19 +80,15 @@ async function eventsOf(taskId: string): Promise<Row[]> {
 const bodyOf = (event: Row) => JSON.parse(String(event.body));
 
 const dirs: string[] = [];
-const probeStores: Cfw5001Store[] = [];
+/** Every task id a test may write on 5001; deleted after the run, pass or fail. */
+const probeIds = new Set<string>();
 afterAll(async () => {
-  // Probe rows cannot be deleted: leave each with `section: null` (dependents go first).
-  for (const store of probeStores) {
-    for (let pass = 0; pass < 5; pass++) {
-      const { items } = await store.list({});
-      if (items.length === 0) break;
-      for (const task of items)
-        await store.remove(task.id).catch(() => undefined);
-    }
+  try {
+    if (live && probeIds.size > 0) await deleteProbeTasks([...probeIds]);
+  } finally {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
   }
-  while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
-}, 120000);
+}, 300000);
 
 function probe(
   options: { api?: ApiTransport; offline?: SqliteTransport } = {},
@@ -112,9 +111,11 @@ function probe(
     now: () => "2026-10-31",
     ...options,
   });
-  if (live)
-    probeStores.push(new Cfw5001Store({ path: `${path}.cleanup`, cfw }));
-  const id = (x: string) => `pt-${RUN}-${n}-${x}`;
+  const id = (x: string) => {
+    const taskId = `pt-${RUN}-${n}-${x}`;
+    probeIds.add(taskId);
+    return taskId;
+  };
   return { home, dir, path, cfw, store, id };
 }
 

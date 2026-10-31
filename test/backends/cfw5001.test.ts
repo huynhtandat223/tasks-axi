@@ -52,7 +52,7 @@ async function reachable(): Promise<boolean> {
   }
 }
 // Writes need the SysAdmin login too: the after hook deletes every probe row it made.
-const live = (await reachable()) && canCleanUp();
+const live = (await reachable()) && (await canCleanUp());
 
 async function api(path: string, method = "GET", body?: unknown) {
   const token = readFileSync(TOKEN_FILE, "utf8").trim();

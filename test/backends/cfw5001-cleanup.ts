@@ -48,8 +48,18 @@ async function signIn(): Promise<string> {
   return cookies.join("; ");
 }
 
-export function canCleanUp(): boolean {
-  return existsSync(SYSADMIN_ENV);
+/** True only when the SysAdmin login that cleanup uses really signs in. */
+export async function canCleanUp(): Promise<boolean> {
+  if (!existsSync(SYSADMIN_ENV)) return false;
+  try {
+    await signIn();
+    return true;
+  } catch (error) {
+    console.warn(
+      `cfw5001 live tests skipped: SysAdmin sign-in failed (${(error as Error).message})`,
+    );
+    return false;
+  }
 }
 
 export interface CleanupResult {

@@ -10,6 +10,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Cfw5001Store, renderRows } from "../../src/backends/cfw5001.js";
+import { createStore } from "../../src/context.js";
+import type { ResolvedConfig } from "../../src/config.js";
 import {
   ApiTransport,
   type Row,
@@ -614,3 +616,40 @@ describe.skipIf(!existsSync(LIVE_DB))(
     });
   },
 );
+
+describe("cfw5001 with no DB configured", () => {
+  function noAnswerStore(env: Record<string, string>) {
+    const dir = mkdtempSync(join(tmpdir(), "cfw5001-"));
+    dirs.push(dir);
+    const config = {
+      backend: "cfw5001",
+      path: join(dir, "backlog.md"),
+      cfw5001: {
+        home: "probe-nodb",
+        base_url: "http://127.0.0.1:1",
+        token_file: join(dir, "token"),
+      },
+    } as unknown as ResolvedConfig;
+    writeFileSync(join(dir, "token"), "t\n");
+    chmodSync(join(dir, "token"), 0o600);
+    return { dir, store: createStore(config, { env, home: dir, cwd: dir }) };
+  }
+
+  it("fails with no DB fallback when the API gives no answer", async () => {
+    const { dir, store } = noAnswerStore({});
+    await expect(store.list({})).rejects.toThrow(
+      "Dev 5001 at http://127.0.0.1:1 gave no answer; reading the DB needs the owner's permission (set TASKS_AXI_CFW5001_DB=<path> for that run)",
+    );
+    expect(existsSync(join(dir, "forge.db"))).toBe(false);
+  });
+
+  it("uses TASKS_AXI_CFW5001_DB when the owner sets it for a run", async () => {
+    const { dir, store } = noAnswerStore({
+      TASKS_AXI_CFW5001_DB: "missing.db",
+    });
+    // A named DB swaps the new error for the raw no-answer one; the file is
+    // absent, so nothing opens it.
+    await expect(store.list({})).rejects.toThrow(/no answer from/);
+    expect(existsSync(join(dir, "missing.db"))).toBe(false);
+  });
+});

@@ -300,7 +300,14 @@ export class Cfw5001Store extends MarkdownStore {
     try {
       return await this.transport.listHome(this.cfw.home);
     } catch (error) {
-      if (!(error instanceof NoAnswerError) || !this.offline) throw error;
+      if (!(error instanceof NoAnswerError)) throw error;
+      if (!this.offline) {
+        throw new AxiError(
+          `Dev 5001 at ${this.cfw.baseUrl} gave no answer; reading the DB needs the owner's permission (set TASKS_AXI_CFW5001_DB=<path> for that run)`,
+          "UNKNOWN",
+          ["Check that Dev 5001 is running"],
+        );
+      }
       if (this.cfw.db && !existsSync(this.cfw.db)) throw error;
       // The API gave no answer: this command reads and writes the host DB.
       this.transport = this.offline;

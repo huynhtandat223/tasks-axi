@@ -263,7 +263,7 @@ Backends sit behind a narrow `Store` interface so additional backends slot in wi
 `backend = "cfw5001"` keeps the backlog in Dev 5001 `fm_task` rows of one home (`backlog_home`).
 Every verb runs `MarkdownStore`'s own rules on a doc rendered from the rows, then writes one `fm_task_event` and one row PATCH per changed task; `rm` and prune clear the row's `section` and never delete.
 `[markdown] path` becomes a read-only render, rewritten after each write.
-When the API gives no answer, the command reads and writes the host SQLite file instead; a refused (4xx/5xx) answer never falls back.
+When the API gives no answer, the command fails, unless `[cfw5001] db` or `TASKS_AXI_CFW5001_DB` names the host SQLite file for that run; set it only with the owner's permission. Then the command reads and writes that file instead. A refused (4xx/5xx) answer never falls back.
 
 ```toml
 backend = "cfw5001"
@@ -276,7 +276,7 @@ home = "main"                      # required: the backlog_home this checkout ow
 # base_url = "http://127.0.0.1:5001"  (else FM_TASK_BASE_URL)
 # token_file = "..."                  (else FM_TASK_TOKEN_FILE, else ~/.local/share/cfw-scripts-private/notify-firstmate.token)
 # auth = "bearer"                     (or "cookie"; else FM_TASK_AUTH)
-# db = "..."                          (offline SQLite file; default: the Dev 5001 forge.db)
+# db = "..."                          (offline SQLite file; else TASKS_AXI_CFW5001_DB; no default: set it for a run only with the owner's permission)
 ```
 
 `tasks-axi render` repairs each row from the fold of its events (each column from the newest event that sets it, a long row from its document child), then rewrites the render.

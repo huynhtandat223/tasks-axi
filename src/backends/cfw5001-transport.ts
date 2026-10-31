@@ -66,9 +66,7 @@ export interface Transport {
 /** Raised when the API gives no answer (connection refused, timeout). */
 export class NoAnswerError extends AxiError {
   constructor(message: string) {
-    super(message, "UNKNOWN", [
-      "Check that Dev 5001 is running, or set `[cfw5001] db` for the offline path",
-    ]);
+    super(message, "UNKNOWN", ["Check that Dev 5001 is running"]);
   }
 }
 
